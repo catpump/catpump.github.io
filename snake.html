@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Caterpillar Snake</title>
+<style>
+  :root {
+    --green: #3BBF8A;
+    --outline: #123D34;
+    --frame: #1c1c1c;
+    --screen: #F5FBF8;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #0c0c0c;
+    color: #ddd;
+    font-family: "Courier New", monospace;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; user-select: none;
+    touch-action: none;
+  }
+  h1 { font-size: 18px; letter-spacing: 4px; color: #6fbf9e; margin: 0; font-weight: normal; }
+
+  .phone {
+    background: var(--frame);
+    border-radius: 22px;
+    padding: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .screen-wrap {
+    background: #2a2a2a;
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,.7);
+  }
+  canvas {
+    display: block;
+    background: var(--screen);
+    border-radius: 3px;
+  }
+  .hud {
+    display: flex; justify-content: space-between;
+    color: #cfeadd;
+    font-size: 13px; font-weight: bold;
+    padding: 4px 4px 8px;
+    letter-spacing: 1px;
+  }
+  .hint { color: #666; font-size: 12px; letter-spacing: 1px; text-align: center; }
+
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 56px);
+    grid-template-rows: repeat(3, 56px);
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .dpad button {
+    background: #2b2b2b; border: none; color: #bbb;
+    font-size: 22px; border-radius: 10px;
+    box-shadow: 0 2px 0 #000; cursor: pointer;
+  }
+  .dpad button:active { transform: translateY(2px); box-shadow: none; }
+  .dpad .up { grid-area: 1 / 2; }
+  .dpad .left { grid-area: 2 / 1; }
+  .dpad .center { grid-area: 2 / 2; background: #202020; }
+  .dpad .right { grid-area: 2 / 3; }
+  .dpad .down { grid-area: 3 / 2; }
+</style>
+</head>
+<body>
+  <h1>C A T E R P I L L A R</h1>
+  <div class="phone">
+    <div class="screen-wrap">
+      <div class="hud">
+        <span id="score">SCORE 0</span>
+        <span id="hi">HI 0</span>
+      </div>
+      <canvas id="game" width="360" height="360"></canvas>
+    </div>
+  </div>
+  <div class="hint" id="hint">ARROWS / WASD to move &nbsp;·&nbsp; SPACE to start</div>
+
+  <div class="dpad">
+    <button class="up"    data-dir="up">▲</button>
+    <button class="left"  data-dir="left">◀</button>
+    <button class="center" id="btnStart">●</button>
+    <button class="right" data-dir="right">▶</button>
+    <button class="down"  data-dir="down">▼</button>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const hiEl = document.getElementById('hi');
+  const hintEl = document.getElementById('hint');
+
+  const CELL = 18;
+  const COLS = canvas.width / CELL;   // 20
+  const ROWS = canvas.height / CELL;  // 20
+
+  // palette (from the caterpillar art)
+  const GREEN   = '#3BBF8A';
+  const GREEN_D = '#2E9E71';
+  const OUTLINE = '#123D34';
+  const WHITE   = '#FFFFFF';
+  const BLUSH   = '#F4A6A0';
+  const SCREEN  = '#F5FBF8';
+
+  let snake, dir, nextDir, facing, food, score, hi, running, gameOver, tickMs, loopId;
+
+  hi = Number(localStorage.getItem('catpillarHi') || 0);
+  hiEl.textContent = 'HI ' + hi;
+
+  function reset() {
+    snake = [{x: 9, y: 10}, {x: 8, y: 10}, {x: 7, y: 10}, {x: 6, y: 10}];
+    dir = {x: 1, y: 0};
+    nextDir = dir;
+    facing = 1;            // 1 = face right, -1 = face left
+    score = 0;
+    tickMs = 140;
+    gameOver = false;
+    placeFood();
+    updateHud();
+  }
+
+  function placeFood() {
+    while (true) {
+      const f = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+      if (!snake.some(s => s.x === f.x && s.y === f.y)) { food = f; return; }
+    }
+  }
+
+  function updateHud() {
+    scoreEl.textContent = 'SCORE ' + score;
+    hiEl.textContent = 'HI ' + hi;
+  }
+
+  // ---------- drawing helpers ----------
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y,     x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x,     y + h, r);
+    ctx.arcTo(x,     y + h, x,     y,     r);
+    ctx.arcTo(x,     y,     x + w, y,     r);
+    ctx.closePath();
+  }
+
+  // a single capsule "pill" body segment, with little legs
+  function drawSegment(cx, cy, i) {
+    const w = CELL * 1.25, h = CELL * 1.4, r = w / 2;    // pill-sized; w & h > CELL so segments always overlap
+    const x = cx - w / 2, y = cy - h / 2;
+
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    // --- legs: a pair of jointed stubs, drawn BEHIND the body so hips tuck under ---
+    ctx.strokeStyle = OUTLINE;
+    ctx.fillStyle = OUTLINE;
+    const swing = (i % 2 === 0) ? 1 : -1;   // alternate stride for a "walking" look
+    for (const s of [-1, 1]) {
+      const hipX = cx + s * w * 0.34, hipY = cy + h * 0.30;
+      const kneeX = hipX + s * 4, kneeY = cy + h * 0.52;
+      const footX = kneeX + swing * 3, footY = cy + h * 0.64;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(hipX, hipY);
+      ctx.lineTo(kneeX, kneeY);
+      ctx.lineTo(footX, footY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(footX, footY, 2.4, 0, Math.PI * 2);   // rounded foot
+      ctx.fill();
+    }
+
+    // --- capsule pill body ---
+    ctx.lineWidth = 3;
+    roundRect(x, y, w, h, r);
+    ctx.fillStyle = GREEN;
+    ctx.fill();
+
+    // white top half (capsule look)
+    ctx.save();
+    roundRect(x, y, w, h, r);
+    ctx.clip();
+    ctx.fillStyle = WHITE;
+    ctx.fillRect(x, y, w, h * 0.5);
+    // glossy highlight on the white cap
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(cx - w * 0.16, y + h * 0.2, w * 0.14, h * 0.13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // outline + seam between the two halves of the capsule
+    roundRect(x, y, w, h, r);
+    ctx.strokeStyle = OUTLINE;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + 2.5, y + h * 0.5);
+    ctx.lineTo(x + w - 2.5, y + h * 0.5);
+    ctx.stroke();
+  }
+
+  // kawaii green cat head, centered, facing `facing`
+  function drawHead(cx, cy) {
+    const R = CELL * 0.82;
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (facing === 1) ctx.scale(-1, 1); // template faces left; flip for right
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = OUTLINE;
+
+    // ears
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(s * R * 0.35, -R * 0.62);
+      ctx.lineTo(s * R * 0.85, -R * 1.25);
+      ctx.lineTo(s * R * 0.95, -R * 0.45);
+      ctx.closePath();
+      ctx.fillStyle = GREEN;
+      ctx.fill(); ctx.stroke();
+      // inner ear
+      ctx.beginPath();
+      ctx.moveTo(s * R * 0.52, -R * 0.62);
+      ctx.lineTo(s * R * 0.8, -R * 1.02);
+      ctx.lineTo(s * R * 0.82, -R * 0.55);
+      ctx.closePath();
+      ctx.fillStyle = WHITE;
+      ctx.fill();
+    }
+
+    // face
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fillStyle = GREEN;
+    ctx.fill(); ctx.stroke();
+
+    // blush
+    ctx.fillStyle = BLUSH;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(s * R * 0.55, R * 0.22, R * 0.16, R * 0.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // eyes
+    ctx.fillStyle = OUTLINE;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(s * R * 0.4, -R * 0.02, R * 0.14, R * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // eye shine
+    ctx.fillStyle = WHITE;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(s * R * 0.4 - R * 0.04, -R * 0.1, R * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // nose + mouth (ᵕ ‿ ᵕ style)
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(-R * 0.12, R * 0.28, R * 0.12, 0, Math.PI);
+    ctx.moveTo(R * 0.12, R * 0.28);
+    ctx.arc(R * 0.12, R * 0.28, R * 0.12, 0, Math.PI);
+    ctx.stroke();
+
+    // whiskers (on the face side = left in template)
+    ctx.lineWidth = 2;
+    for (const dy of [-R * 0.12, R * 0.05, R * 0.22]) {
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.85, dy);
+      ctx.lineTo(-R * 1.35, dy - R * 0.06);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // placeholder pill food (swapped for the art you send next)
+  function drawFood(cx, cy) {
+    const w = CELL * 1.5, h = CELL * 0.85, r = h / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-Math.PI / 6);
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    roundRect(-w / 2, -h / 2, w, h, r);
+    ctx.fillStyle = GREEN; ctx.fill();
+    ctx.save(); roundRect(-w / 2, -h / 2, w, h, r); ctx.clip();
+    ctx.fillStyle = WHITE; ctx.fillRect(-w / 2, -h / 2, w / 2, h); ctx.restore();
+    roundRect(-w / 2, -h / 2, w, h, r);
+    ctx.strokeStyle = OUTLINE; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -h / 2 + 2); ctx.lineTo(0, h / 2 - 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.fillStyle = SCREEN;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cc = (c) => c * CELL + CELL / 2;
+
+    // soft ground shadow under the caterpillar
+    ctx.fillStyle = 'rgba(18,61,52,0.08)';
+    snake.forEach(s => {
+      ctx.beginPath();
+      ctx.ellipse(cc(s.x), cc(s.y) + CELL * 0.75, CELL * 0.7, CELL * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    drawFood(cc(food.x), cc(food.y));
+
+    // body from tail toward head so segments overlap nicely
+    for (let i = snake.length - 1; i >= 1; i--) drawSegment(cc(snake[i].x), cc(snake[i].y), i);
+    // head last, on top
+    drawHead(cc(snake[0].x), cc(snake[0].y));
+
+    if (!running && !gameOver) banner('PRESS START');
+    if (gameOver) banner('GAME OVER');
+  }
+
+  function banner(text) {
+    ctx.fillStyle = 'rgba(18,61,52,0.9)';
+    ctx.fillRect(0, canvas.height / 2 - 20, canvas.width, 40);
+    ctx.fillStyle = '#EAF7F0';
+    ctx.font = 'bold 18px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  }
+
+  // ---------- game loop ----------
+  function step() {
+    dir = nextDir;
+    if (dir.x !== 0) facing = dir.x > 0 ? 1 : -1;
+    const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+
+    if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) return end();
+    if (snake.some(s => s.x === head.x && s.y === head.y)) return end();
+
+    snake.unshift(head);
+
+    if (head.x === food.x && head.y === food.y) {
+      score += 1;
+      if (score > hi) { hi = score; localStorage.setItem('catpillarHi', hi); }
+      if (tickMs > 70) tickMs -= 3;
+      updateHud();
+      placeFood();
+      schedule();
+    } else {
+      snake.pop();
+    }
+    draw();
+  }
+
+  function schedule() {
+    clearInterval(loopId);
+    loopId = setInterval(step, tickMs);
+  }
+
+  function start() {
+    if (running) return;
+    if (gameOver || !snake) reset();
+    running = true;
+    hintEl.textContent = 'ARROWS / WASD to move';
+    schedule();
+    draw();
+  }
+
+  function end() {
+    running = false;
+    gameOver = true;
+    clearInterval(loopId);
+    hintEl.textContent = 'SPACE / ● to play again';
+    draw();
+  }
+
+  function setDir(nx, ny) {
+    if (nx === -dir.x && ny === -dir.y) return;
+    nextDir = {x: nx, y: ny};
+  }
+
+  const keyMap = {
+    ArrowUp: [0,-1], w: [0,-1], W: [0,-1],
+    ArrowDown: [0,1], s: [0,1], S: [0,1],
+    ArrowLeft: [-1,0], a: [-1,0], A: [-1,0],
+    ArrowRight: [1,0], d: [1,0], D: [1,0],
+  };
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); start(); return; }
+    const m = keyMap[e.key];
+    if (m) { e.preventDefault(); if (!running && !gameOver) start(); setDir(m[0], m[1]); }
+  });
+
+  document.querySelectorAll('.dpad button[data-dir]').forEach(btn => {
+    const dirs = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
+    const handler = (e) => {
+      e.preventDefault();
+      const d = dirs[btn.dataset.dir];
+      if (!running && !gameOver) start();
+      setDir(d[0], d[1]);
+    };
+    btn.addEventListener('click', handler);
+    btn.addEventListener('touchstart', handler, {passive:false});
+  });
+  document.getElementById('btnStart').addEventListener('click', start);
+
+  let touchStart = null;
+  canvas.addEventListener('touchstart', e => {
+    touchStart = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+  }, {passive:true});
+  canvas.addEventListener('touchend', e => {
+    if (!touchStart) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+    if (Math.abs(dx) > Math.abs(dy)) setDir(dx > 0 ? 1 : -1, 0);
+    else setDir(0, dy > 0 ? 1 : -1);
+    if (!running && !gameOver) start();
+    touchStart = null;
+  }, {passive:true});
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>
