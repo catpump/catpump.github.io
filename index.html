@@ -81,6 +81,7 @@
       <canvas id="game" width="360" height="360"></canvas>
     </div>
   </div>
+ 
   <div class="dpad">
     <button class="up"    data-dir="up">▲</button>
     <button class="left"  data-dir="left">◀</button>
@@ -88,7 +89,8 @@
     <button class="right" data-dir="right">▶</button>
     <button class="down"  data-dir="down">▼</button>
   </div>
-  <div class="hint" id="hint">ARROWS / WASD to move &nbsp;·&nbsp; SPACE to start</div>
+
+   <div class="hint" id="hint">ARROWS / WASD to move &nbsp;·&nbsp; SPACE to start</div>
 
 <script>
 (() => {
@@ -158,25 +160,6 @@
     ctx.lineWidth = 3;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-
-    // --- legs: a pair of jointed stubs, drawn BEHIND the body so hips tuck under ---
-    ctx.strokeStyle = OUTLINE;
-    ctx.fillStyle = OUTLINE;
-    const swing = (i % 2 === 0) ? 1 : -1;   // alternate stride for a "walking" look
-    for (const s of [-1, 1]) {
-      const hipX = cx + s * w * 0.34, hipY = cy + h * 0.30;
-      const kneeX = hipX + s * 4, kneeY = cy + h * 0.52;
-      const footX = kneeX + swing * 3, footY = cy + h * 0.64;
-      ctx.lineWidth = 2.6;
-      ctx.beginPath();
-      ctx.moveTo(hipX, hipY);
-      ctx.lineTo(kneeX, kneeY);
-      ctx.lineTo(footX, footY);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(footX, footY, 2.4, 0, Math.PI * 2);   // rounded foot
-      ctx.fill();
-    }
 
     // --- capsule pill body ---
     ctx.lineWidth = 3;
